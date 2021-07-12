@@ -12,7 +12,12 @@ Raw data and annotations downloaded from https://www.ncbi.nlm.nih.gov/geo/query/
 - Gene counts are normalized and split into 3 different cell types: mono2 (monocytes), treg (T regulatory cells), and cd4 (CD4+ T cells, downsized to 2000 cells for easy computation)
 - Dx (diagnosis) labels are COVID, IIH, MS, VE
 
-### Resources
+### Additional background readings
+- A gentle introduction to RNA sequencing: https://www.youtube.com/watch?v=tlf6wYJrwKY
+- Single cell sequencing: https://en.wikipedia.org/wiki/Single_cell_sequencing
+- Rapid review of neurological associations with COVID-19: https://www.thelancet.com/journals/laneur/article/PIIS1474-4422(20)30221-0/fulltext
+
+### Coding resources
 - Download R: https://www.r-project.org/
 - Download R studio: https://www.rstudio.com/products/rstudio/download/
 - Crash course on R basics: https://www.youtube.com/watch?v=ZYdXI1GteDE
