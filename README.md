@@ -11,3 +11,9 @@ Raw data and annotations downloaded from https://www.ncbi.nlm.nih.gov/geo/query/
 - Annotations are paired with count matrix in a Seurat object
 - Gene counts are normalized and split into 3 different cell types: mono2 (monocytes), treg (T regulatory cells), and cd4 (CD4+ T cells, downsized to 2000 cells for easy computation)
 - Dx (diagnosis) labels are COVID, IIH, MS, VE
+
+### Resources
+- Download R: https://www.r-project.org/
+- Download R studio: https://www.rstudio.com/products/rstudio/download/
+- Crash course on R basics: https://www.youtube.com/watch?v=ZYdXI1GteDE
+- Seurat tutorial: https://satijalab.org/seurat/articles/pbmc3k_tutorial.html
