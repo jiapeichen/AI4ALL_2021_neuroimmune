@@ -1,0 +1,211 @@
+---
+title: "SingleCell"
+author: "Jiapei"
+date: "6/28/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r init}
+library(dplyr)
+library(Seurat)
+
+# Load dataset
+immunity.data <- Read10X(data.dir = "/Users/jiapei/Desktop/AI4ALL/Immunity_data/")
+# Initialize  Seurat object with the raw (non-normalized data)
+immunity <- CreateSeuratObject(counts = immunity.data, project = "immunity", min.cells = 3, min.features = 200)
+immunity
+```
+
+```{r explore dataset}
+# Lets examine a few genes in the first thirty cells
+immunity.data[c("CD3D","TCL1A","MS4A1"), 1:30]
+
+# Check what % of genes are mitochondrial in each cell and add to metadata as percent.mt (high mitochondrial genes = bad quality cell)
+immunity[["percent.mt"]] <- PercentageFeatureSet(object = immunity, pattern = "^MT-")
+#immunity[["percent.rb"]] <- PercentageFeatureSet(object = immunity, pattern = "-RP[SL]") #percent of ribosomal genes
+head(immunity@meta.data,5)
+
+# Preload annotations (diagnostics, patient ID, cluster
+cluster <- read.csv(file = '/Users/jiapei/Desktop/AI4ALL/annotation/GSE163005_annotation_cluster.csv', row.names = 1)
+immunity[["cluster"]] <- cluster
+dx <- read.csv(file = '/Users/jiapei/Desktop/AI4ALL/annotation/GSE163005_annotation_dx.csv', row.names = 1)
+immunity[["dx"]] <- dx
+patient <- read.csv(file = '/Users/jiapei/Desktop/AI4ALL/annotation/GSE163005_annotation_patients.csv', row.names = 1)
+immunity[["patient"]] <- patient
+
+# Show QC metrics for the first 5 cells
+head(x = immunity@meta.data, 5)
+```
+
+```{r QC}
+#Visualize QC metrics as a violin plot
+wd <- "/Users/jiapei/Desktop/AI4ALL/"
+setwd(wd) #where the graph will be saved
+tiff("qc.tiff", width=2000, height=1000, res=120)
+VlnPlot(object = immunity, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+dev.off()
+
+# FeatureScatter is typically used to visualize feature-feature relationships
+setwd(wd)
+tiff("qcFeaturePlot.tiff", width=2000, height=1000, res=120)
+plot1 <- FeatureScatter(immunity, feature1 = "nCount_RNA", feature2 = "percent.mt") 
+plot2 <- FeatureScatter(immunity, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") 
+CombinePlots(plots = list(plot1,plot2))
+dev.off()
+
+# Filter nFeature (doublet or poor quality), nCount (doublet, adjust based on data), percent.mt
+immunity <- subset(x = immunity, subset = nFeature_RNA < 6000 & nCount_RNA < 30000 & percent.mt < 5) 
+# Keep perc mt to under 5% (otherwise get clusters with primarily MT- genes)
+# Check size of Seurat object
+immunity
+
+# Further filtering: only keep features (genes) that have >1 count in >5 cells; saves time in downstream analysis (reduce dataset size)
+mincounts <- 1
+mincells <- 5
+IsFeatureExpressed <- rowSums(as.matrix(immunity[["RNA"]]@counts >= mincounts)) >= mincells
+ExpressedFeatures <- rownames(immunity)[IsFeatureExpressed]
+immunity <- subset(x = immunity, features = ExpressedFeatures)
+# Check size
+immunity
+```
+
+```{r normalize}
+#SCTransform combines NormalizeData, FindVariableFeatures, ScaleData workflow. Results are saved in a new assay (can be custom named) with counts being (corrected) counts, data being log1p(counts), scale.data being pearson residuals; sctransform::vst intermediate results are saved in misc slot of new assay.
+immunity <- SCTransform(immunity, vars.to.regress = "percent.mt", variable.features.n = 2000)
+immunity <- RunPCA(immunity, verbose = F)
+
+# if SCTransform takes too long, try this:
+immunity <- NormalizeData(object = immunity, normalization.method = "LogNormalize", scale.factor = 1e4)
+immunity <- FindVariableFeatures(object = immunity, selection.method = 'vst', nfeatures = 2000)
+# Identify the 10 most highly variable genes
+top10 <- head(x = VariableFeatures(object = immunity), 10)
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(object = immunity)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+CombinePlots(plots = list(plot1, plot2))
+all.genes <- rownames(x = immunity)
+immunity <- ScaleData(object = immunity, features = all.genes)
+# if scaling is taking too long, try this:
+# default in `ScaleData` is only to perform scaling on the previously identified variable features (2,000 by default)
+immunity <- ScaleData(object = immunity)
+# to remove unwanted sources of variation from a single-cell dataset: we can 'regress out' heterogeneity associated with (for example) cell cycle stage, or mitochondrial contamination.
+immunity <- ScaleData(object = immunity, vars.to.regress = 'percent.mt')
+# perform linear dimentional reduction
+immunity <- RunPCA(object = immunity, features = VariableFeatures(object = immunity))
+```
+
+```{r pca visualization}
+# top genes (features) in PC1 to PC5
+print(x = immunity[['pca']], dims = 1:5, nfeatures = 5)
+
+setwd(wd)
+tiff("PC_loading.tiff", width=1000, height=1000, res=120)
+VizDimLoadings(immunity, dims = 1:2, reduction = 'pca')
+
+tiff("PCA_plot.tiff", width=750, height=500, res=120)
+DimPlot(immunity, reduction = 'pca')
+dev.off()
+
+setwd(wd)
+tiff("PC1to6_heatmap.tiff", width=1000, height=1000, res=120)
+DimHeatmap(immunity, dims = 1:6, cells = 500, balanced = T)
+dev.off()
+```
+
+```{r elbow_plot}
+setwd(wd)
+tiff("ElbowPlot.tiff", width=600, height=600, res=120)
+ElbowPlot(immunity)
+dev.off()
+```
+
+```{r cluster}
+immunity <- FindNeighbors(immunity, dims = 1:30) #number of PCs (try 6 or 10)
+immunity <- FindClusters(object = immunity, resolution = 0.2) #try different resolutions
+
+# Check metadata
+head(x = immunity@meta.data, 5)
+
+# tSNE or UMAP clustering
+# If you haven't installed UMAP, you can do so via reticulate::py_install(packages = "umap-learn")
+immunity <- RunUMAP(immunity, dims = 1:30, verbose = F)
+immunity <- RunTSNE(immunity, dims = 1:30, verbose = F)
+
+setwd(wd)
+tiff("umap_PC30_res02.tiff", width=600, height=600, res=120)
+DimPlot(immunity, reduction = 'umap', label = T) + NoLegend()
+tiff("tsne_PC30_res02.tiff", width=600, height=600, res=120)
+DimPlot(immunity, reduction = 'tsne', label = T) + NoLegend()
+dev.off()
+
+# QC: group by nCount (gene expression level), nFeature (number of genes / cell), and percent.mt
+FeaturePlot(immunity, reduction = 'umap', features = "nCount_RNA")
+FeaturePlot(immunity, reduction = 'umap', features = "nFeature_RNA")
+FeaturePlot(immunity, reduction = 'umap', features = "percent.mt")
+
+# group by orig.ident (e.g. by region)
+setwd(wd)
+tiff("umap_cluster.tiff", width=600, height=600, res=120)
+DimPlot(immunity, reduction = 'umap', group.by = 'cluster', label = T) + NoLegend()
+dev.off()
+
+setwd(wd)
+tiff("umap_dx.tiff", width=2400, height=600, res=120)
+DimPlot(immunity, reduction = 'umap', split.by = 'dx')
+tiff("umap_patient.tiff", width=6000, height=600, res=120)
+DimPlot(immunity, reduction = 'umap', split.by = 'patient')
+dev.off()
+```
+
+```{r find markers}
+markers <- FindAllMarkers(immunity, only.pos = T, min.pct = 0.25, logfc.threshold = 0.25)
+
+setwd(wd)
+res <- markers %>% group_by(cluster) %>% top_n(n = 25, wt = avg_log2FC) #display top 25 genes in each cluster
+write.csv(res, file = "top25marker.csv", row.names = T)
+```
+
+```{r save object}
+setwd(wd)
+saveRDS(immunity, file = "immunity.rds")
+```
+
+```{r markerplots}
+IDs <- c("0 CD4 1","1 Ribosomes","2 CD4 2","3 mDC","4 CD8","5 Interferon response","6 NK","7 Cytotoxic 1","8 Macrophages","9 Cycling","10 Naive B","11 Granulocytes","12 pDC","13 Plasma","14 mDC","15 Cytotoxic 2")
+names(x = IDs) <- levels(x = immunity)
+immunity <- RenameIdents(immunity, IDs)
+#immunity[["celltype"]] <- Idents(immunity)
+
+marker_genes <- c("TRAC","RPLP2","IL7R","FCER1A","CD8A","IFI6","GNLY","GZMA","LYVE1","TOP2A","MS4A1","S100A9","CLEC4C","CD38","XCR1","PTGDS")
+
+setwd(wd)
+tiff("VlnPlot_MarkerGenes.tiff", width=3000, height=3000, res=120)
+VlnPlot(immunity, features = c("PF4","FCGR3A","LYZ")) #representative marker gene for each cluster
+# you can plot raw counts (not normalized) as well
+#VlnPlot(object = combine_Mg_23gw, features = c("AIF1", "SPP1"), slot = 'counts', log = TRUE)
+tiff("FeatPlot_MarkerGenes.tiff", width=3000, height=2000, res=120)
+FeaturePlot(immunity, reduction = 'umap', features = marker_genes)
+dev.off()
+
+setwd(wd)
+tiff("DotPlot_MarkerGenes.tiff", width=1200, height=500, res=120)
+DotPlot(immunity, features = marker_genes) + RotatedAxis()
+#tiff("RidgePlot_MarkerGenes.tiff", width=3000, height=2000, res=120)
+#RidgePlot(object, feature = marker_genes)
+dev.off()
+
+setwd(wd)
+tiff("umap_dx.tiff", width=3000, height=800, res=120)
+DimPlot(immunity, reduction = 'umap', label = F, repel = T, split.by = "dx")
+dev.off()
+```
